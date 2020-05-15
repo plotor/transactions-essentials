@@ -8,9 +8,6 @@
 
 package com.atomikos.jdbc.internal;
 
-
-import java.util.Map;
-
 import com.atomikos.icatch.HeurCommitException;
 import com.atomikos.icatch.HeurHazardException;
 import com.atomikos.icatch.HeurMixedException;
@@ -21,31 +18,24 @@ import com.atomikos.icatch.SysException;
 import com.atomikos.logging.Logger;
 import com.atomikos.logging.LoggerFactory;
 
+import java.util.Map;
+
 /**
- *
- *
- *
  * A participant for non-XA interactions. Instances are NOT recoverable in the
  * sense that commit/rollback can fail after prepare. This is an implicit
  * limitation of non-XA transactions.
- *
- *
- *
- *
  */
 
-class AtomikosNonXAParticipant implements Participant
-{
-	private static final Logger LOGGER = LoggerFactory.createLogger(AtomikosNonXAParticipant.class);
+class AtomikosNonXAParticipant implements Participant {
+    private static final Logger LOGGER = LoggerFactory.createLogger(AtomikosNonXAParticipant.class);
 
-	private boolean readOnly;
+    private boolean readOnly;
 
-	private String name;
+    private String name;
 
-	private NonXaConnectionProxy connection;
-    
-    AtomikosNonXAParticipant ( NonXaConnectionProxy connection , String name )
-    {
+    private NonXaConnectionProxy connection;
+
+    AtomikosNonXAParticipant(NonXaConnectionProxy connection, String name) {
         this.connection = connection;
         this.name = name;
     }
@@ -54,9 +44,9 @@ class AtomikosNonXAParticipant implements Participant
      * @see Participant
      */
 
-    public void setCascadeList ( Map<String, Integer> allParticipants )
-            throws SysException
-    {
+    @Override
+    public void setCascadeList(Map<String, Integer> allParticipants)
+            throws SysException {
         // ignore
 
     }
@@ -64,8 +54,8 @@ class AtomikosNonXAParticipant implements Participant
     /**
      * @see com.atomikos.icatch.Participant#setGlobalSiblingCount(int)
      */
-    public void setGlobalSiblingCount ( int count )
-    {
+    @Override
+    public void setGlobalSiblingCount(int count) {
         // ignore
 
     }
@@ -75,9 +65,9 @@ class AtomikosNonXAParticipant implements Participant
      *
      * @see com.atomikos.icatch.Participant#prepare()
      */
-    public int prepare () throws RollbackException, HeurHazardException,
-            HeurMixedException, SysException
-    {
+    @Override
+    public int prepare() throws RollbackException, HeurHazardException,
+                                HeurMixedException, SysException {
         if (!readOnly) {
             //see https://github.com/atomikos/transactions-essentials/issues/83
             String msg = this.toString();
@@ -86,90 +76,86 @@ class AtomikosNonXAParticipant implements Participant
         }
         // DON'T return readOnly: we need the terminated event to reuse the connection in the pool!
         int ret = Participant.READ_ONLY + 1;
-    	return ret;
+        return ret;
     }
 
     /**
      * @see com.atomikos.icatch.Participant#commit(boolean)
      */
 
-    public void commit ( boolean onePhase )
+    @Override
+    public void commit(boolean onePhase)
             throws HeurRollbackException, HeurHazardException,
-            HeurMixedException, RollbackException, SysException
-    {
+                   HeurMixedException, RollbackException, SysException {
         try {
-            connection.transactionTerminated ( true );
-        } catch ( Exception e ) {
-            LOGGER.logError ( "Error in non-XA commit", e );
-            //see case 30752: don't throw HAZARD because retries are probably useless
-            //and the connection won't be reused by the pool but destroyed instead
-            throw new HeurMixedException();
-        }   
-    }
-
-
-	/**
-     * @see com.atomikos.icatch.Participant#rollback()
-     */
-    public void rollback () throws HeurCommitException,
-            HeurMixedException, HeurHazardException, SysException
-    {
-       
-        try {
-            connection.transactionTerminated ( false );
-        } catch ( Exception e ) {
-            LOGGER.logError ( "Error in non-XA rollback", e );
+            connection.transactionTerminated(true);
+        } catch (Exception e) {
+            LOGGER.logError("Error in non-XA commit", e);
             //see case 30752: don't throw HAZARD because retries are probably useless
             //and the connection won't be reused by the pool but destroyed instead
             throw new HeurMixedException();
         }
-        
+    }
+
+    /**
+     * @see com.atomikos.icatch.Participant#rollback()
+     */
+    @Override
+    public void rollback() throws HeurCommitException,
+                                  HeurMixedException, HeurHazardException, SysException {
+
+        try {
+            connection.transactionTerminated(false);
+        } catch (Exception e) {
+            LOGGER.logError("Error in non-XA rollback", e);
+            //see case 30752: don't throw HAZARD because retries are probably useless
+            //and the connection won't be reused by the pool but destroyed instead
+            throw new HeurMixedException();
+        }
+
     }
 
     /**
      * @see com.atomikos.icatch.Participant#forget()
      */
-    public void forget ()
-    {
+    @Override
+    public void forget() {
         // do nothing special, since DB doesn't know about 2PC or heuristics
 
     }
 
-
-    public String getURI ()
-    {
+    @Override
+    public String getURI() {
         return null;
     }
 
-	public void setReadOnly ( boolean readOnly )
-	{
-		this.readOnly = readOnly;
-	}
+    public void setReadOnly(boolean readOnly) {
+        this.readOnly = readOnly;
+    }
 
+    @Override
+    public String toString() {
+        return com.atomikos.jdbc.AtomikosNonXADataSourceBean.class.getName() + " '" + name +
+                "' [NB: this resource does not support two-phase commit unless configured as readOnly]";
+    }
 
-	@Override
-	public String toString() {
-		return com.atomikos.jdbc.AtomikosNonXADataSourceBean.class.getName() + " '" + name +
-        "' [NB: this resource does not support two-phase commit unless configured as readOnly]";
-	}
+    @Override
+    public String getResourceName() {
+        return name;
+    }
 
-	@Override
-	public String getResourceName() {
-		return name;
-	}
-	
-	@Override
-	public boolean equals(Object o) {
-	    boolean ret = false;
-	    if (o instanceof AtomikosNonXAParticipant) {
-	        AtomikosNonXAParticipant other = (AtomikosNonXAParticipant) o;
-	        ret = connection == other.connection;
-	    }
-	    return ret;
-	}
-	
-	@Override
-	public int hashCode() {
-	    return connection.hashCode();
-	}
+    @Override
+    public boolean equals(Object o) {
+        boolean ret = false;
+        if (o instanceof AtomikosNonXAParticipant) {
+            AtomikosNonXAParticipant other = (AtomikosNonXAParticipant) o;
+            ret = connection == other.connection;
+        }
+        return ret;
+    }
+
+    @Override
+    public int hashCode() {
+        return connection.hashCode();
+    }
 }

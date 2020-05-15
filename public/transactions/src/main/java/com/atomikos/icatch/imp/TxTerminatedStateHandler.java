@@ -23,88 +23,86 @@ import com.atomikos.recovery.TxState;
  * A transaction terminated state handler.
  */
 
-class TxTerminatedStateHandler extends TransactionStateHandler
-{
-	private static Logger LOGGER = LoggerFactory.createLogger(TxTerminatedStateHandler.class);
+class TxTerminatedStateHandler extends TransactionStateHandler {
+    private static Logger LOGGER = LoggerFactory.createLogger(TxTerminatedStateHandler.class);
 
     private boolean transactionCommitted;
 
-    protected TxTerminatedStateHandler ( CompositeTransactionImp ct ,
-            TransactionStateHandler handler , boolean transactionCommitted )
-    {
-        super ( ct , handler );
+    protected TxTerminatedStateHandler(CompositeTransactionImp ct,
+                                       TransactionStateHandler handler, boolean transactionCommitted) {
+        super(ct, handler);
         this.transactionCommitted = transactionCommitted;
     }
 
-    protected CompositeTransaction createSubTransaction () throws SysException,
-            IllegalStateException
-    {
-        throw new IllegalStateException ( "Transaction no longer active" );
+    @Override
+    protected CompositeTransaction createSubTransaction() throws SysException,
+                                                                 IllegalStateException {
+        throw new IllegalStateException("Transaction no longer active");
     }
 
-    protected RecoveryCoordinator addParticipant ( Participant participant )
-            throws SysException, java.lang.IllegalStateException
-    {
+    @Override
+    protected RecoveryCoordinator addParticipant(Participant participant)
+            throws SysException, java.lang.IllegalStateException {
 
-        if ( !transactionCommitted ) {
-        	// can happen after resuming a timedout transaction;
+        if (!transactionCommitted) {
+            // can happen after resuming a timedout transaction;
             // accept the participant, but call rollback immediately
-        	// cf JBoss
+            // cf JBoss
             try {
                 participant.rollback();
-            } catch ( Exception ignore ) {
-            	LOGGER.logTrace("Ignoring error on participant rollback",ignore);
+            } catch (Exception ignore) {
+                LOGGER.logTrace("Ignoring error on participant rollback", ignore);
             }
         } else {
             // transaction already committed, possibly with 2PC
             // so adding more work is unacceptable
-            throw new IllegalStateException ( "Transaction no longer active" );
+            throw new IllegalStateException("Transaction no longer active");
         }
 
         return getCT().getCoordinatorImp();
     }
 
-    protected void registerSynchronization ( Synchronization sync )
-            throws IllegalStateException, UnsupportedOperationException, SysException
-    {
-        throw new IllegalStateException ( "Transaction no longer active" );
+    @Override
+    protected void registerSynchronization(Synchronization sync)
+            throws IllegalStateException, UnsupportedOperationException, SysException {
+        throw new IllegalStateException("Transaction no longer active");
     }
 
-    protected void addSubTxAwareParticipant ( SubTxAwareParticipant subtxaware )
-            throws SysException, java.lang.IllegalStateException
-    {
+    @Override
+    protected void addSubTxAwareParticipant(SubTxAwareParticipant subtxaware)
+            throws SysException, java.lang.IllegalStateException {
 
-        if ( transactionCommitted )
-            throw new IllegalStateException ( "Transaction no longer active" );
-        else {
+        if (transactionCommitted) {
+            throw new IllegalStateException("Transaction no longer active");
+        } else {
             // accept the participant, but call rollback immediately
             // needed to allow JBoss integration for marked aborts
-            subtxaware.rolledback ( getCT() );
+            subtxaware.rolledback(getCT());
         }
     }
 
-    protected void rollbackWithStateCheck () throws java.lang.IllegalStateException, SysException
-
-    {
-        if (transactionCommitted) throw new IllegalStateException ( "Transaction no longer active" );
+    @Override
+    protected void rollbackWithStateCheck() throws java.lang.IllegalStateException, SysException {
+        if (transactionCommitted) throw new IllegalStateException("Transaction no longer active");
     }
 
-    protected void commit () throws SysException,
-            java.lang.IllegalStateException, RollbackException
-    {
-        if (!transactionCommitted) throw new IllegalStateException ( "Transaction no longer active" );
+    @Override
+    protected void commit() throws SysException,
+                                   java.lang.IllegalStateException, RollbackException {
+        if (!transactionCommitted) throw new IllegalStateException("Transaction no longer active");
     }
 
-    protected TxState getState()
-    {
-        if ( transactionCommitted ) return getCT().getCoordinatorImp().getStateWithTwoPhaseCommitDecision();
-        else {
-        	// Because we have no rolled back state, we return marked abort.
+    @Override
+    protected TxState getState() {
+        if (transactionCommitted) {
+            return getCT().getCoordinatorImp().getStateWithTwoPhaseCommitDecision();
+        } else {
+            // Because we have no rolled back state, we return marked abort.
             // This should be indistinguishable for the client: a later rollback
             // will fail, but that will seem like an intermediate timeout rollback
             // of the transaction service
-        	return TxState.MARKED_ABORT;
+            return TxState.MARKED_ABORT;
         }
-        
+
     }
 }

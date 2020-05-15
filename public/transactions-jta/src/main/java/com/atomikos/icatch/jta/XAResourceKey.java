@@ -16,27 +16,24 @@ import javax.transaction.xa.XAResource;
  * hashtable that uses the XAResource instance for mapping. This is needed
  * because otherwise the JTA wouldn't work with XAResource implementations that
  * have overridden equals.
- *
  */
-class XAResourceKey
-{
+class XAResourceKey {
 
     private XAResource xares;
 
-    public XAResourceKey ( XAResource xares )
-    {
-        super ();
+    public XAResourceKey(XAResource xares) {
+        super();
         this.xares = xares;
     }
 
-    public boolean equals ( Object o )
-    {
+    @Override
+    public boolean equals(Object o) {
         boolean ret = false;
-        if ( o instanceof XAResourceKey ) {
+        if (o instanceof XAResourceKey) {
             XAResourceKey other = (XAResourceKey) o;
             try {
-                ret = (other.xares == xares || other.xares.isSameRM ( xares ));
-            } catch ( XAException e ) {
+                ret = (other.xares == xares || other.xares.isSameRM(xares));
+            } catch (XAException e) {
                 // just return false
             }
         }
@@ -44,14 +41,14 @@ class XAResourceKey
         return ret;
     }
 
-    public int hashCode ()
-    {
-        return xares.getClass ().getName ().toString ().hashCode ();
+    @Override
+    public int hashCode() {
+        return xares.getClass().getName().toString().hashCode();
     }
 
-    public String toString ()
-    {
-        return xares.toString ();
+    @Override
+    public String toString() {
+        return xares.toString();
     }
 
 }

@@ -8,8 +8,6 @@
 
 package com.atomikos.icatch.imp;
 
-import java.util.Stack;
-
 import com.atomikos.icatch.CompositeTransaction;
 import com.atomikos.icatch.Participant;
 import com.atomikos.icatch.RecoveryCoordinator;
@@ -17,10 +15,9 @@ import com.atomikos.icatch.SubTxAwareParticipant;
 import com.atomikos.icatch.Synchronization;
 import com.atomikos.recovery.TxState;
 
+import java.util.Stack;
 
 /**
- *
- *
  * A transaction terminating state handler. The purpose of this
  * state is to detect and prevent concurrency effects when
  * a timout/rollback thread interleaves with an application/commit
@@ -29,85 +26,81 @@ import com.atomikos.recovery.TxState;
  * second thread will see this state and its safety checks.
  */
 
-class TxTerminatingStateHandler extends TransactionStateHandler
-{
+class TxTerminatingStateHandler extends TransactionStateHandler {
 
+    private boolean committing;
 
-	private boolean committing;
+    public TxTerminatingStateHandler(boolean committing, CompositeTransactionImp ct,
+                                     TransactionStateHandler handler) {
+        super(ct, handler);
+        this.committing = committing;
+    }
 
-	public TxTerminatingStateHandler ( boolean committing , CompositeTransactionImp ct,
-			TransactionStateHandler handler )
-	{
-		super ( ct , handler );
-		this.committing = committing;
-	}
+    private void reject() throws IllegalStateException {
+        if (committing) {
+            throw new IllegalStateException("Transaction is committing - adding a new participant is not allowed");
+        } else {
+            throw new IllegalStateException("Transaction is rolling back - adding a new participant is not allowed");
+        }
+    }
 
-	private void reject() throws IllegalStateException
-	{
-		if ( committing )
-			throw new IllegalStateException ( "Transaction is committing - adding a new participant is not allowed" );
-		else
-			throw new IllegalStateException ( "Transaction is rolling back - adding a new participant is not allowed" );
-	}
+    /**
+     * @return ACTIVE or JPA implementations like EclipseJPA will not attempt to flush changes before commit!
+     */
+    @Override
+    protected TxState getState() {
+        return TxState.ACTIVE;
+    }
 
-	/**
-	 * @return ACTIVE or JPA implementations like EclipseJPA will not attempt to flush changes before commit!
-	 */
-	protected TxState getState()
-	{
-		return TxState.ACTIVE;
-	}
+    @Override
+    protected RecoveryCoordinator addParticipant(Participant p) {
+        if (!committing) reject();
 
-	protected RecoveryCoordinator addParticipant ( Participant p )
-	{
-		if ( ! committing ) reject();
+        return super.addParticipant(p);
+    }
 
-		return super.addParticipant ( p );
-	}
+    @Override
+    protected void addSubTxAwareParticipant(SubTxAwareParticipant p) {
+        if (!committing) reject();
 
-	protected void addSubTxAwareParticipant ( SubTxAwareParticipant p )
-	{
-		if ( ! committing ) reject();
+        super.addSubTxAwareParticipant(p);
+    }
 
-		super.addSubTxAwareParticipant ( p );
-	}
+    @Override
+    protected void addSynchronizations(Stack<Synchronization> s) {
+        reject();
+    }
 
-	protected void addSynchronizations ( Stack<Synchronization> s )
-	{
-		reject();
-	}
+    @Override
+    protected void commit() {
+        //reject in all cases, even if committing: the application thread should commit, and only once
+        reject();
+    }
 
-	protected void commit()
-	{
-		//reject in all cases, even if committing: the application thread should commit, and only once
-		reject();
-	}
+    @Override
+    protected CompositeTransaction createSubTransaction() {
+        reject();
+        return null;
+    }
 
-	protected CompositeTransaction createSubTransaction()
-	{
-		reject();
-		return null;
-	}
+    protected void registerSynchronization() {
+        reject();
+    }
 
-	protected void registerSynchronization()
-	{
-		reject();
-	}
+    @Override
+    protected void rollbackWithStateCheck() {
+        if (committing) reject();
 
-	protected void rollbackWithStateCheck()
-	{
-		if ( committing ) reject();
+        //return silently if rolling back already: rollback twice should be the same as once
+    }
 
-		//return silently if rolling back already: rollback twice should be the same as once
-	}
+    @Override
+    protected void setRollbackOnly() {
 
-	protected void setRollbackOnly()
-	{
-
-		if ( committing ) {
-			//happens legally if synchronizations call this method!
-			super.setRollbackOnly();
-		} //else ignore: already rolling back; this is consistent with what is asked
-	}
+        if (committing) {
+            //happens legally if synchronizations call this method!
+            super.setRollbackOnly();
+        } //else ignore: already rolling back; this is consistent with what is asked
+    }
 
 }

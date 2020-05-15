@@ -46,20 +46,17 @@ import com.atomikos.timing.AlarmTimerListener;
 import com.atomikos.timing.PooledAlarmTimer;
 
 /**
- *
  * All things related to termination logic.
- * 
  */
 
 public class CoordinatorImp implements CompositeCoordinator, Participant,
-        RecoveryCoordinator, RecoverableCoordinator, AlarmTimerListener, Stateful,
-        FSMPreEnterListener, FSMTransitionListener
-{
-	private static final Logger LOGGER = LoggerFactory.createLogger(CoordinatorImp.class);
+                                       RecoveryCoordinator, RecoverableCoordinator, AlarmTimerListener, Stateful,
+                                       FSMPreEnterListener, FSMTransitionListener {
+    private static final Logger LOGGER = LoggerFactory.createLogger(CoordinatorImp.class);
 
     static long DEFAULT_MILLIS_BETWEEN_TIMER_WAKEUPS = 150;
     // SHOULD NOT BE BIG, otherwise lots of sleeping threads -> OUT OF MEMORY!
-    
+
     private static final int MAX_NUMBER_OF_TIMEOUT_TICKS_FOR_INDOUBTS = 30;
     private static final int MAX_NUMBER_OF_TIMEOUT_TICKS_BEFORE_ROLLBACK_OF_ACTIVES = 30;
 
@@ -73,13 +70,14 @@ public class CoordinatorImp implements CompositeCoordinator, Participant,
     private String root_ = null;
     private String coordinatorId = null;
     private FSM fsm_ = null;
-    private Vector<Participant> participants_ = new Vector<Participant>();
-    private RecoveryCoordinator superiorCoordinator_ = null; 
+    /** 记录所有的事务参与者 */
+    private Vector<Participant> participants_ = new Vector<>();
+    private RecoveryCoordinator superiorCoordinator_ = null;
 
     private CoordinatorStateHandler stateHandler_;
     private boolean single_threaded_2pc_;
-	private transient List<Synchronization> synchronizations;
-	private boolean timedout = false;
+    private transient List<Synchronization> synchronizations;
+    private boolean timedout = false;
 
     private String recoveryDomainName;
 
@@ -87,64 +85,54 @@ public class CoordinatorImp implements CompositeCoordinator, Participant,
      * Constructor for testing only.
      */
 
-    protected CoordinatorImp ( String root)
-    {
+    protected CoordinatorImp(String root) {
         root_ = root;
         this.coordinatorId = root;
         initFsm(TxState.ACTIVE);
-       
-        setStateHandler ( new ActiveStateHandler ( this ) );
-        startThreads ( DEFAULT_MILLIS_BETWEEN_TIMER_WAKEUPS );
+
+        setStateHandler(new ActiveStateHandler(this));
+        startThreads(DEFAULT_MILLIS_BETWEEN_TIMER_WAKEUPS);
         single_threaded_2pc_ = false;
         synchronizations = new ArrayList<Synchronization>();
     }
 
-	private void initFsm(TxState initialState) {
-		fsm_ = new FSMImp ( this, initialState );
-        fsm_.addFSMPreEnterListener ( this, TxState.TERMINATED );
-        fsm_.addFSMPreEnterListener ( this, TxState.HEUR_COMMITTED );
-        fsm_.addFSMPreEnterListener ( this, TxState.HEUR_ABORTED );
-        fsm_.addFSMPreEnterListener ( this, TxState.HEUR_MIXED );
-        fsm_.addFSMPreEnterListener ( this, TxState.HEUR_HAZARD );
-        fsm_.addFSMPreEnterListener ( this, TxState.ABANDONED);
-        fsm_.addFSMTransitionListener ( this, TxState.COMMITTING, TxState.TERMINATED );
-        fsm_.addFSMTransitionListener ( this, TxState.ABORTING, TxState.TERMINATED );
-        fsm_.addFSMTransitionListener ( this, TxState.PREPARING, TxState.TERMINATED);
-	}
+    private void initFsm(TxState initialState) {
+        fsm_ = new FSMImp(this, initialState);
+        fsm_.addFSMPreEnterListener(this, TxState.TERMINATED);
+        fsm_.addFSMPreEnterListener(this, TxState.HEUR_COMMITTED);
+        fsm_.addFSMPreEnterListener(this, TxState.HEUR_ABORTED);
+        fsm_.addFSMPreEnterListener(this, TxState.HEUR_MIXED);
+        fsm_.addFSMPreEnterListener(this, TxState.HEUR_HAZARD);
+        fsm_.addFSMPreEnterListener(this, TxState.ABANDONED);
+        fsm_.addFSMTransitionListener(this, TxState.COMMITTING, TxState.TERMINATED);
+        fsm_.addFSMTransitionListener(this, TxState.ABORTING, TxState.TERMINATED);
+        fsm_.addFSMTransitionListener(this, TxState.PREPARING, TxState.TERMINATED);
+    }
 
     /**
      * Constructor.
      *
      * @param recoveryDomainName
-     *
      * @param coordinatorId
-     * 
-     * @param root
-     *            The root tid.
-     * @param coord
-     *            The RecoverCoordinator, null if root.
-     * @param console
-     *            The console to log to, or null if none.
-     * @param timeout
-     *            The timeout in milliseconds for indoubts before a heuristic
-     *            decision is made.
-     * 
-     * @param single_threaded_2pc
-     * 			 If true then commit is done in the same thread as the one that
-     *            started the tx.
+     * @param root The root tid.
+     * @param coord The RecoverCoordinator, null if root.
+     * @param console The console to log to, or null if none.
+     * @param timeout The timeout in milliseconds for indoubts before a heuristic
+     * decision is made.
+     * @param single_threaded_2pc If true then commit is done in the same thread as the one that
+     * started the tx.
      */
 
-    protected CoordinatorImp ( String recoveryDomainName, String coordinatorId, String root , RecoveryCoordinator coord ,
-            long timeout , boolean single_threaded_2pc )
-    {
+    protected CoordinatorImp(String recoveryDomainName, String coordinatorId, String root, RecoveryCoordinator coord,
+                             long timeout, boolean single_threaded_2pc) {
         root_ = root;
         this.coordinatorId = coordinatorId;
         this.recoveryDomainName = recoveryDomainName;
         single_threaded_2pc_ = single_threaded_2pc;
-	    initFsm(TxState.ACTIVE );
+        initFsm(TxState.ACTIVE);
 
         superiorCoordinator_ = coord;
-        if ( timeout > DEFAULT_MILLIS_BETWEEN_TIMER_WAKEUPS ) {
+        if (timeout > DEFAULT_MILLIS_BETWEEN_TIMER_WAKEUPS) {
             // If timeout is smaller than the default timeout, then
             // there is no need to re-adjust the next two fields
             // since the defaults will be used.
@@ -152,8 +140,8 @@ public class CoordinatorImp implements CompositeCoordinator, Participant,
             maxNumberOfTimeoutTicksBeforeRollback_ = maxNumberOfTimeoutTicksBeforeHeuristicDecision_;
         }
 
-        setStateHandler ( new ActiveStateHandler ( this ) );
-        startThreads ( DEFAULT_MILLIS_BETWEEN_TIMER_WAKEUPS );
+        setStateHandler(new ActiveStateHandler(this));
+        startThreads(DEFAULT_MILLIS_BETWEEN_TIMER_WAKEUPS);
         synchronizations = new ArrayList<Synchronization>();
     }
 
@@ -161,75 +149,60 @@ public class CoordinatorImp implements CompositeCoordinator, Participant,
      * No argument constructor as required by Recoverable interface.
      */
 
-    public CoordinatorImp ()
-    {
+    public CoordinatorImp() {
 
-    	initFsm(TxState.ACTIVE );
+        initFsm(TxState.ACTIVE);
 
         single_threaded_2pc_ = false;
         synchronizations = new ArrayList<Synchronization>();
 
     }
 
-
-
-    boolean prefersSingleThreaded2PC()
-    {
-    		return single_threaded_2pc_;
+    boolean prefersSingleThreaded2PC() {
+        return single_threaded_2pc_;
     }
 
     /**
      * Mark the tx as committed. Needed for testing.
      */
 
-    void setCommitted ()
-    {
-        stateHandler_.setCommitted ();
+    void setCommitted() {
+        stateHandler_.setCommitted();
     }
 
     /**
      * Set the state handler. This method should always be preferred over
      * calling setState directly.
      *
-     * @param stateHandler
-     *            The next state handler.
+     * @param stateHandler The next state handler.
      */
 
-    void setStateHandler ( CoordinatorStateHandler stateHandler )
-    {
+    void setStateHandler(CoordinatorStateHandler stateHandler) {
         // NB: if this method is synchronized then deadlock happens on heuristic mixed!
-        TxState state = stateHandler.getState ();
+        TxState state = stateHandler.getState();
         stateHandler_ = stateHandler;
-        setState ( state );
+        setState(state);
     }
 
-
-    RecoveryCoordinator getSuperiorRecoveryCoordinator ()
-    {
+    RecoveryCoordinator getSuperiorRecoveryCoordinator() {
         return superiorCoordinator_;
     }
 
-    public Vector<Participant> getParticipants ()
-    {
+    public Vector<Participant> getParticipants() {
         return participants_;
     }
 
-
-    int getLocalSiblingCount ()
-    {
+    int getLocalSiblingCount() {
         return localSiblingsStarted;
     }
 
-    long getMaxIndoubtTicks ()
-    {
+    long getMaxIndoubtTicks() {
         return maxNumberOfTimeoutTicksBeforeHeuristicDecision_;
     }
 
-    long getMaxRollbackTicks ()
-    {
+    long getMaxRollbackTicks() {
         return maxNumberOfTimeoutTicksBeforeRollback_;
     }
-
 
     /**
      * Tests if the transaction was committed or not.
@@ -237,51 +210,45 @@ public class CoordinatorImp implements CompositeCoordinator, Participant,
      * @return boolean True iff committed.
      */
 
-    public boolean isCommitted ()
-    {
-        return stateHandler_.isCommitted ();
+    public boolean isCommitted() {
+        return stateHandler_.isCommitted();
     }
 
     /**
      * Start threads, propagator and timer logic. Needed on construction AND by
      * replay request events: timers have stopped by then!
      *
-     * @param timeout
-     *            The timeout for the thread wakeup interval.
-     * @param console
-     *            The console, null if none.
+     * @param timeout The timeout for the thread wakeup interval.
+     * @param console The console, null if none.
      */
 
-    private void startThreads ( long timeout )
-    {
-    	synchronized ( fsm_ ) {
-    		if ( timer_ == null ) { //not null for repeated recovery 
-    			stateHandler_.activate ();
-    			timer_ = new PooledAlarmTimer(timeout);
-    			timer_.addAlarmTimerListener(this);
-    			submitTimer(timer_);
-    		} 
-    	}
+    private void startThreads(long timeout) {
+        synchronized (fsm_) {
+            if (timer_ == null) { //not null for repeated recovery
+                stateHandler_.activate();
+                timer_ = new PooledAlarmTimer(timeout);
+                timer_.addAlarmTimerListener(this);
+                submitTimer(timer_);
+            }
+        }
 
     }
 
-   
     private void submitTimer(AlarmTimer timer) {
-    		TaskManager.SINGLETON.executeTask (timer);
-	}
+        TaskManager.SINGLETON.executeTask(timer);
+    }
 
-	protected long getTimeOut ()
-    {
-        return (maxNumberOfTimeoutTicksBeforeRollback_ - stateHandler_.getRollbackTicks ())
+    protected long getTimeOut() {
+        return (maxNumberOfTimeoutTicksBeforeRollback_ - stateHandler_.getRollbackTicks())
                 * DEFAULT_MILLIS_BETWEEN_TIMER_WAKEUPS;
     }
 
-   
-    void setState ( TxState state ) throws IllegalStateException
-    {
-        if ( LOGGER.isTraceEnabled() ) LOGGER.logTrace ( "Coordinator " + getCoordinatorId ()
-                + " entering state: " + state.toString () );
-        fsm_.setState ( state );
+    void setState(TxState state) throws IllegalStateException {
+        if (LOGGER.isTraceEnabled()) {
+            LOGGER.logTrace("Coordinator " + getCoordinatorId()
+                    + " entering state: " + state.toString());
+        }
+        fsm_.setState(state);
 
     }
 
@@ -289,42 +256,36 @@ public class CoordinatorImp implements CompositeCoordinator, Participant,
      * @see Stateful
      */
 
-    public TxState getState ()
-    {
+    public TxState getState() {
         // this method should NOT be synchronized to avoid
         // recursive 2PC deadlocks!
-        return fsm_.getState ();
+        return fsm_.getState();
     }
 
-   
     /**
      * @see FSMEnterEventSource.
      */
 
-    void addFSMEnterListener ( FSMEnterListener l, TxState state )
-    {
-        fsm_.addFSMEnterListener ( l, state );
+    void addFSMEnterListener(FSMEnterListener l, TxState state) {
+        fsm_.addFSMEnterListener(l, state);
 
     }
 
-  
+
     /*
      * @see FSMPreEnterEventSource.
      */
 
-    public void addFSMPreEnterListener ( FSMPreEnterListener l, TxState state )
-    {
-        fsm_.addFSMPreEnterListener ( l, state );
+    public void addFSMPreEnterListener(FSMPreEnterListener l, TxState state) {
+        fsm_.addFSMPreEnterListener(l, state);
 
     }
-
 
     /**
      * @see CompositeCoordinator.
      */
 
-    public RecoveryCoordinator getRecoveryCoordinator ()
-    {
+    public RecoveryCoordinator getRecoveryCoordinator() {
         return this;
     }
 
@@ -332,39 +293,41 @@ public class CoordinatorImp implements CompositeCoordinator, Participant,
      * @see CompositeCoordinator.
      */
 
-    public Participant getParticipant () throws UnsupportedOperationException
-    {
+    public Participant getParticipant() throws UnsupportedOperationException {
         return this;
     }
 
     /**
-     * @see com.atomikos.icatch.CompositeCoordinator.
+     * @see CompositeCoordinator#getCoordinatorId()
      */
-
-    public String getCoordinatorId ()
-    {
+    @Override
+    public String getCoordinatorId() {
         return coordinatorId;
     }
 
-    RecoveryCoordinator addParticipant (
-            Participant participant ) throws SysException,
-            java.lang.IllegalStateException, RollbackException
-    {
-    	synchronized ( fsm_ ) {
-    		if ( !getState ().equals ( TxState.ACTIVE ) )
-    			throw new IllegalStateException (
-    					getCoordinatorId() +
-    					" is no longer active but in state " +
-    					getState ().toString () );
+    /**
+     * 添加事务参与者
+     *
+     * @param participant
+     * @return
+     * @throws SysException
+     * @throws IllegalStateException
+     * @throws RollbackException
+     */
+    RecoveryCoordinator addParticipant(Participant participant) throws SysException, IllegalStateException, RollbackException {
+        synchronized (fsm_) {
+            if (!getState().equals(TxState.ACTIVE)) {
+                throw new IllegalStateException(
+                        getCoordinatorId() + " is no longer active but in state " + getState().toString());
+            }
 
-    		//FIRST add participant, THEN set state to support active recovery
-    		if ( !participants_.contains ( participant ) ) {
-    			participants_.add ( participant );
-    		}
-    		//make sure that aftercompletion notification is done.
-    		setState ( TxState.ACTIVE );
-    	}
-
+            //FIRST add participant, THEN set state to support active recovery
+            if (!participants_.contains(participant)) {
+                participants_.add(participant);
+            }
+            //make sure that aftercompletion notification is done.
+            setState(TxState.ACTIVE);
+        }
 
         return this;
 
@@ -374,24 +337,23 @@ public class CoordinatorImp implements CompositeCoordinator, Participant,
      * Called when a tx import is being done.
      */
 
-    protected void incLocalSiblingsStarted ()
-    {
-    	synchronized ( fsm_ ) {
-    		localSiblingsStarted++;
-    	}
+    protected void incLocalSiblingsStarted() {
+        synchronized (fsm_) {
+            localSiblingsStarted++;
+        }
     }
-    
+
     protected void incLocalSiblingsTerminated() throws HeurRollbackException, HeurMixedException, SysException, SecurityException, HeurCommitException, HeurHazardException, IllegalStateException, RollbackException {
-        synchronized ( fsm_ ) {
+        synchronized (fsm_) {
             localSiblingsTerminated++;
             if (hasTimedOut() && !hasActiveSiblings()) {
                 terminate(false);
             }
         }
     }
-    
+
     boolean hasTimedOut() {
-        synchronized ( fsm_ ) {
+        synchronized (fsm_) {
             return timedout;
         }
     }
@@ -399,62 +361,59 @@ public class CoordinatorImp implements CompositeCoordinator, Participant,
     public boolean hasActiveSiblings() {
         return localSiblingsStarted > localSiblingsTerminated;
     }
-    
-    void registerSynchronization ( Synchronization sync )
+
+    void registerSynchronization(Synchronization sync)
             throws RollbackException, IllegalStateException,
-            UnsupportedOperationException, SysException
+                   UnsupportedOperationException, SysException {
 
-    {
-
-    	synchronized ( fsm_ ) {
-    		if ( !getState ().equals ( TxState.ACTIVE ) )
-    			throw new IllegalStateException ( "wrong state: " + getState () );   		
-    		rememberSychronizationForAfterCompletion(sync);
-    	}
+        synchronized (fsm_) {
+            if (!getState().equals(TxState.ACTIVE)) {
+                throw new IllegalStateException("wrong state: " + getState());
+            }
+            rememberSychronizationForAfterCompletion(sync);
+        }
     }
 
- 
     private void rememberSychronizationForAfterCompletion(Synchronization sync) {
-		getSynchronizations().add(sync);		
-	}
+        getSynchronizations().add(sync);
+    }
 
-	private List<Synchronization> getSynchronizations() {
-		synchronized(fsm_) {
-			if (synchronizations == null) synchronizations = new ArrayList<Synchronization>();
-			return synchronizations;
-		}
-	}
-	
-	void notifySynchronizationsAfterCompletion(TxState... successiveStates) {
-		for ( TxState state : successiveStates ) {
-			for (Synchronization s : getSynchronizations()) {
-				try {
-					s.afterCompletion(state);
-				} catch (Throwable t) {
-					LOGGER.logWarning("Unexpected error in afterCompletion", t);
-				}
-			}
-		}
-	}
+    private List<Synchronization> getSynchronizations() {
+        synchronized (fsm_) {
+            if (synchronizations == null) synchronizations = new ArrayList<Synchronization>();
+            return synchronizations;
+        }
+    }
 
-	/**
+    void notifySynchronizationsAfterCompletion(TxState... successiveStates) {
+        for (TxState state : successiveStates) {
+            for (Synchronization s : getSynchronizations()) {
+                try {
+                    s.afterCompletion(state);
+                } catch (Throwable t) {
+                    LOGGER.logWarning("Unexpected error in afterCompletion", t);
+                }
+            }
+        }
+    }
+
+    /**
      * @see FSMPreEnterListener.
      */
 
-    public void preEnter ( FSMEnterEvent event ) throws IllegalStateException
-    {
-    	TxState state = event.getState ();
-    	if (state.isHeuristic() && requiresHeuristics()) {
-    	    //if logcloud: recovery will take care of this so don't publish event
-    	    TransactionHeuristicEvent the = new TransactionHeuristicEvent(getCoordinatorId(), superiorCoordinatorId(), state);
-    	    EventPublisher.INSTANCE.publish(the);
-    	}   	
-    	if (state.isFinalStateForOltp()) {
-    	    dispose ();
-    	} 
-        
+    public void preEnter(FSMEnterEvent event) throws IllegalStateException {
+        TxState state = event.getState();
+        if (state.isHeuristic() && requiresHeuristics()) {
+            //if logcloud: recovery will take care of this so don't publish event
+            TransactionHeuristicEvent the = new TransactionHeuristicEvent(getCoordinatorId(), superiorCoordinatorId(), state);
+            EventPublisher.INSTANCE.publish(the);
+        }
+        if (state.isFinalStateForOltp()) {
+            dispose();
+        }
+
     }
-    
+
     boolean requiresHeuristics() {
         boolean ret = false;
         if (recoveryDomainName != null) { // can be null for testing            
@@ -471,96 +430,92 @@ public class CoordinatorImp implements CompositeCoordinator, Participant,
      * @see Participant
      */
 
-    public String getURI ()
-    {
-        return getCoordinatorId ();
+    public String getURI() {
+        return getCoordinatorId();
     }
 
     /**
      * @see Participant.
      */
 
-    public void forget ()
-    {
-        stateHandler_.forget ();
+    public void forget() {
+        stateHandler_.forget();
     }
 
     /**
      * @see Participant.
      */
 
-    public void setCascadeList ( Map<String,Integer> allParticipants )
-            throws SysException
-    {
-        stateHandler_.setCascadeList ( allParticipants );
+    public void setCascadeList(Map<String, Integer> allParticipants)
+            throws SysException {
+        stateHandler_.setCascadeList(allParticipants);
     }
 
     /**
-     * @see Participant.
+     * @see Participant#setGlobalSiblingCount(int)
      */
-
-    public void setGlobalSiblingCount ( int count )
-    {
-        stateHandler_.setGlobalSiblingCount ( count );
+    @Override
+    public void setGlobalSiblingCount(int count) {
+        stateHandler_.setGlobalSiblingCount(count);
     }
 
     /**
-     * @see Participant.
+     * @see Participant
      */
-
-    public int prepare () throws RollbackException,
-            java.lang.IllegalStateException, HeurHazardException,
-            HeurMixedException, SysException
-    {
+    @Override
+    public int prepare() throws RollbackException,
+                                IllegalStateException,
+                                HeurHazardException,
+                                HeurMixedException,
+                                SysException {
         // FIRST, TAKE CARE OF DUPLICATE PREPARES
 
         // Recursive prepare-calls should be avoided for not deadlocking rollback/commit methods
         // If a recursive prepare re-enters, then it will see a voting state -> reject.
         // Note that this may also avoid some legal prepares, but only rarely
-        if ( getState ().equals ( TxState.PREPARING ) )
-            throw new RollbackException ( "Recursion detected" );
+        if (getState().equals(TxState.PREPARING)) {
+            throw new RollbackException("Recursion detected");
+        }
 
         int ret = Participant.READ_ONLY + 1;
-        synchronized ( fsm_ ) {
-        	ret = stateHandler_.prepare ();
-        	if ( ret == Participant.READ_ONLY ) {
-
-        		 if ( LOGGER.isTraceEnabled() ) LOGGER.logTrace (  "prepare() of Coordinator  " + getCoordinatorId ()
-         				+ " returning READONLY" );
-        	} else {
-
-        		 if ( LOGGER.isTraceEnabled() ) LOGGER.logTrace ( "prepare() of Coordinator  " + getCoordinatorId ()
-         				+ " returning YES vote");
-        	}
+        synchronized (fsm_) {
+            ret = stateHandler_.prepare();
+            if (ret == Participant.READ_ONLY) {
+                if (LOGGER.isTraceEnabled()) {
+                    LOGGER.logTrace("prepare() of Coordinator  " + getCoordinatorId() + " returning READONLY");
+                }
+            } else {
+                if (LOGGER.isTraceEnabled()) {
+                    LOGGER.logTrace("prepare() of Coordinator  " + getCoordinatorId() + " returning YES vote");
+                }
+            }
         }
         return ret;
 
     }
 
     /**
-     * @see Participant.
+     * @see Participant#commit(boolean)
      */
-
-    public void commit ( boolean onePhase )
+    @Override
+    public void commit(boolean onePhase)
             throws HeurRollbackException, HeurMixedException,
-            HeurHazardException, java.lang.IllegalStateException,
-            RollbackException, SysException
-    {
-    	synchronized ( fsm_ ) {
-    		 stateHandler_.commit(onePhase);
-    	}
+                   HeurHazardException, java.lang.IllegalStateException,
+                   RollbackException, SysException {
+        synchronized (fsm_) {
+            stateHandler_.commit(onePhase);
+        }
     }
 
     /**
-     * @see Participant.
+     * @see Participant#rollback()
      */
+    @Override
+    public void rollback() throws HeurCommitException,
+                                  HeurMixedException, SysException, HeurHazardException,
+                                  java.lang.IllegalStateException {
 
-    public void rollback () throws HeurCommitException,
-            HeurMixedException, SysException, HeurHazardException,
-            java.lang.IllegalStateException
-    {
-    	
-        if ( getState ().equals ( TxState.ABORTING ) ) {
+        if (getState().equals(TxState.ABORTING)) {
             // this method is ONLY called for EXTERNAL events -> by remote coordinators
             // therefore, state aborting means either a recursive
             // call or a concurrent rollback by two different coordinators.
@@ -575,207 +530,204 @@ public class CoordinatorImp implements CompositeCoordinator, Participant,
         // here, we are certain that no RECURSIVE call is going on,
         // so we can safely lock this instance.
 
-        synchronized ( fsm_ ) {
-        	stateHandler_.rollback();
+        synchronized (fsm_) {
+            stateHandler_.rollback();
         }
     }
 
-
-    void rollbackHeuristically ()
+    void rollbackHeuristically()
             throws HeurCommitException, HeurMixedException, SysException,
-            HeurHazardException, java.lang.IllegalStateException
-    {
-        synchronized ( fsm_ ) {
-        	stateHandler_.rollbackHeuristically();
-        } 
+                   HeurHazardException, java.lang.IllegalStateException {
+        synchronized (fsm_) {
+            stateHandler_.rollbackHeuristically();
+        }
     }
 
-    void commitHeuristically () throws HeurMixedException,
-            SysException, HeurRollbackException, HeurHazardException,
-            java.lang.IllegalStateException, RollbackException
-    {
-    	synchronized ( fsm_ ) {
-    		stateHandler_.commitHeuristically();
-    	}
+    void commitHeuristically() throws HeurMixedException,
+                                      SysException, HeurRollbackException, HeurHazardException,
+                                      java.lang.IllegalStateException, RollbackException {
+        synchronized (fsm_) {
+            stateHandler_.commitHeuristically();
+        }
     }
-
 
     /**
      * @see RecoveryCoordinator.
      */
 
-    public Boolean replayCompletion ( Participant participant )
-            throws IllegalStateException
-    {
-    	if(LOGGER.isDebugEnabled()){
-    		LOGGER.logDebug("replayCompletion ( " + participant
-                    + " ) received by coordinator " + getCoordinatorId ()
-                    + " for participant " + participant.toString ());
-    	}
+    public Boolean replayCompletion(Participant participant)
+            throws IllegalStateException {
+        if (LOGGER.isDebugEnabled()) {
+            LOGGER.logDebug("replayCompletion ( " + participant
+                    + " ) received by coordinator " + getCoordinatorId()
+                    + " for participant " + participant.toString());
+        }
         Boolean ret = null;
-        synchronized ( fsm_ ) {
-        	ret = stateHandler_.replayCompletion ( participant );
+        synchronized (fsm_) {
+            ret = stateHandler_.replayCompletion(participant);
         }
         return ret;
     }
 
+    private boolean excludedFromLogging(TxState state) {
+        boolean ret = false;
+        if (!state.isRecoverableState()) {
+            ret = true;
+        } else if (superiorCoordinator_ == null) {
+            if (state.equals(TxState.IN_DOUBT)) {
+                ret = true; //see case 23693: don't log prepared state for roots
+            } else if (participants_.isEmpty()) {
+                ret = true; //see case 84851: avoid logging overhead for empty transactions
+            }
+        }
 
-	private boolean excludedFromLogging(TxState state) {
-		boolean ret = false;
-		if (!state.isRecoverableState() ) {
-				ret = true;
-		} else if ( superiorCoordinator_ == null) {
-			if ( state.equals( TxState.IN_DOUBT )) {
-				ret = true; //see case 23693: don't log prepared state for roots 
-			} else if ( participants_.isEmpty() ) {
-				ret = true; //see case 84851: avoid logging overhead for empty transactions
-			}					
-		}
-		
-		if (state.isHeuristic()) {
-			//new recovery: don't log heuristics - let recovery clean them up
-			ret = true;
-		}
-		
-		return ret;
-	}
+        if (state.isHeuristic()) {
+            //new recovery: don't log heuristics - let recovery clean them up
+            ret = true;
+        }
 
+        return ret;
+    }
 
-    public void alarm ( AlarmTimer timer )
-    {
+    public void alarm(AlarmTimer timer) {
         try {
-            stateHandler_.onTimeout ();
-        } catch ( Exception e ) {
-            LOGGER.logWarning( "Exception on timeout of coordinator " + root_ , e );
+            stateHandler_.onTimeout();
+        } catch (Exception e) {
+            LOGGER.logWarning("Exception on timeout of coordinator " + root_, e);
         }
     }
 
-    protected void dispose ()
-    {
-    	synchronized ( fsm_ ) {
-    		if ( timer_ != null ) {
-    			if ( LOGGER.isTraceEnabled() ) LOGGER.logTrace ( "Coordinator " + getCoordinatorId() + " : stopping timer..." );
-    			timer_.stop ();
-    		}
-    		if ( LOGGER.isTraceEnabled() ) LOGGER.logTrace ( "Coordinator " + getCoordinatorId() + " : disposing statehandler " + stateHandler_.getState() + "..." );
-    		stateHandler_.dispose ();
-    		if ( LOGGER.isTraceEnabled() ) LOGGER.logTrace ( "Coordinator " + getCoordinatorId() + " : disposed." );
-    	}
+    protected void dispose() {
+        synchronized (fsm_) {
+            if (timer_ != null) {
+                if (LOGGER.isTraceEnabled()) LOGGER.logTrace("Coordinator " + getCoordinatorId() + " : stopping timer...");
+                timer_.stop();
+            }
+            if (LOGGER.isTraceEnabled()) LOGGER.logTrace("Coordinator " + getCoordinatorId() + " : disposing statehandler " + stateHandler_.getState() + "...");
+            stateHandler_.dispose();
+            if (LOGGER.isTraceEnabled()) LOGGER.logTrace("Coordinator " + getCoordinatorId() + " : disposed.");
+        }
     }
 
     /**
      * Terminate the work, on behalf of Terminator.
      *
-     * @param commit
-     *            True iff commit termination is asked.
+     * @param commit True iff commit termination is asked.
      */
 
-    protected void terminate ( boolean commit ) throws HeurRollbackException,
-            HeurMixedException, SysException, java.lang.SecurityException,
-            HeurCommitException, HeurHazardException, RollbackException,
-            IllegalStateException
-
-    {    
-    	synchronized ( fsm_ ) {
-    		if ( commit ) {
-    			if ( participants_.size () <= 1 ) {
-    				commit ( true );
-    			} else {
-    				int prepareResult = prepare ();
-    				// make sure to only do commit if NOT read only
-    				if ( prepareResult != Participant.READ_ONLY )
-    					commit ( false );
-    			}
-    		} else {
-    			rollback ();
-    		}
-    	}
-    }
-
-    void setRollbackOnly() { 	
-    	
-    	RollbackOnlyParticipant p = new RollbackOnlyParticipant ( );
-
-    	try {
-    		addParticipant ( p );
-    	} catch ( IllegalStateException alreadyTerminated ) {
-    		//happens in rollback after timeout - see case 27857; ignore but log
-    		if ( LOGGER.isTraceEnabled() ) LOGGER.logTrace ( "Error during setRollbackOnly" , alreadyTerminated );
-    	} catch ( RollbackException e ) {
-    		//ignore: corresponds to desired outcome
-    		if ( LOGGER.isTraceEnabled() ) LOGGER.logTrace ( "Error during setRollbackOnly" , e );
+    protected void terminate(boolean commit) throws HeurRollbackException,
+                                                    HeurMixedException,
+                                                    SysException,
+                                                    SecurityException,
+                                                    HeurCommitException,
+                                                    HeurHazardException,
+                                                    RollbackException,
+                                                    IllegalStateException {
+        synchronized (fsm_) {
+            if (commit) {
+                // 至多只有一个参与者，无需走 2PC
+                if (participants_.size() <= 1) {
+                    commit(true);
+                }
+                // 参与者有多个，走 2PC
+                else {
+                    // 2PC prepare
+                    int prepareResult = prepare();
+                    // make sure to only do commit if NOT read only
+                    if (prepareResult != Participant.READ_ONLY) {
+                        commit(false);
+                    }
+                }
+            } else {
+                rollback();
+            }
         }
     }
 
-	public TxState getStateWithTwoPhaseCommitDecision() {
-		TxState ret = getState();
-		if (TxState.TERMINATED.equals(getState())) {
-			if (isCommitted()) ret = TxState.COMMITTED;
-			else ret = TxState.ABORTED;
-		} else if (TxState.HEUR_ABORTED.equals(getState())) {
-			ret = TxState.ABORTED;
-		} else if (TxState.HEUR_COMMITTED.equals(getState())) {
-			ret = TxState.COMMITTED;
-		} else if (TxState.HEUR_HAZARD.equals(getState())) {
-			if (isCommitted()) ret = TxState.COMMITTING;
-			else ret = TxState.ABORTING;
-		}
-		return ret;
-	}
+    void setRollbackOnly() {
 
+        RollbackOnlyParticipant p = new RollbackOnlyParticipant();
 
+        try {
+            addParticipant(p);
+        } catch (IllegalStateException alreadyTerminated) {
+            //happens in rollback after timeout - see case 27857; ignore but log
+            if (LOGGER.isTraceEnabled()) LOGGER.logTrace("Error during setRollbackOnly", alreadyTerminated);
+        } catch (RollbackException e) {
+            //ignore: corresponds to desired outcome
+            if (LOGGER.isTraceEnabled()) LOGGER.logTrace("Error during setRollbackOnly", e);
+        }
+    }
 
-	@Override
-	public void transitionPerformed(FSMTransitionEvent e) {
-	    //nothing to do in open source
-	}
-	
-	@Override
-	public PendingTransactionRecord getPendingTransactionRecord(TxState state) {
-		synchronized ( fsm_ ) {
-    		if ( excludedFromLogging(state)) {
-    				//merely return null to avoid logging overhead
-    				return null;
-    		}
-    		else {
-        		return new PendingTransactionRecord(this.getCoordinatorId(), state, this.getExpires(), recoveryDomainName, superiorCoordinatorId());	
-    		}	
-    	}
-	}
+    public TxState getStateWithTwoPhaseCommitDecision() {
+        TxState ret = getState();
+        if (TxState.TERMINATED.equals(getState())) {
+            if (isCommitted()) {
+                ret = TxState.COMMITTED;
+            } else {
+                ret = TxState.ABORTED;
+            }
+        } else if (TxState.HEUR_ABORTED.equals(getState())) {
+            ret = TxState.ABORTED;
+        } else if (TxState.HEUR_COMMITTED.equals(getState())) {
+            ret = TxState.COMMITTED;
+        } else if (TxState.HEUR_HAZARD.equals(getState())) {
+            if (isCommitted()) {
+                ret = TxState.COMMITTING;
+            } else {
+                ret = TxState.ABORTING;
+            }
+        }
+        return ret;
+    }
+
+    @Override
+    public void transitionPerformed(FSMTransitionEvent e) {
+        //nothing to do in open source
+    }
+
+    @Override
+    public PendingTransactionRecord getPendingTransactionRecord(TxState state) {
+        synchronized (fsm_) {
+            if (excludedFromLogging(state)) {
+                //merely return null to avoid logging overhead
+                return null;
+            } else {
+                return new PendingTransactionRecord(this.getCoordinatorId(), state, this.getExpires(), recoveryDomainName, superiorCoordinatorId());
+            }
+        }
+    }
 
     private String superiorCoordinatorId() {
-		String ret = null;
-		if (getSuperiorRecoveryCoordinator()!=null) {
-			ret =  this.getSuperiorRecoveryCoordinator().getURI();
-		}
-		return ret;
-	}
+        String ret = null;
+        if (getSuperiorRecoveryCoordinator() != null) {
+            ret = this.getSuperiorRecoveryCoordinator().getURI();
+        }
+        return ret;
+    }
 
+    private long getExpires() {
+        return System.currentTimeMillis() + getTimeOut();
+    }
 
+    @Override
+    public String getResourceName() {
+        return null;
+    }
 
-	private long getExpires() {
-		return System.currentTimeMillis() + getTimeOut();
-	}
-
-
-	@Override
-	public String getResourceName() {
-		return null;
-	}
-
-	@Override
-	public String getRootId() {
-		return root_;
-	}
+    @Override
+    public String getRootId() {
+        return root_;
+    }
 
     public void timedout(boolean rollbackOnly) {
-        synchronized ( fsm_ ) {
+        synchronized (fsm_) {
             timedout = true;
             if (rollbackOnly) {
                 setRollbackOnly();
             }
         }
-        
+
     }
 
     public boolean isRoot() {
@@ -786,6 +738,5 @@ public class CoordinatorImp implements CompositeCoordinator, Participant,
     public String getRecoveryDomainName() {
         return recoveryDomainName;
     }
-
 
 }
